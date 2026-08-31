@@ -1,74 +1,97 @@
+import dev.detekt.gradle.extensions.FailOnSeverity
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-  kotlin("jvm")
-  id("fabric-loom")
+  alias(libs.plugins.loom)
+  alias(libs.plugins.kotlin)
+  alias(libs.plugins.detekt)
   `maven-publish`
-  java
 }
 
-val baseGroup: String by project
-val lwjglVersion: String by project
-val modVersion: String by project
-val modName: String by project
+val baseGroup = providers.gradleProperty("baseGroup").get()
+val modId = providers.gradleProperty("modId").get()
+val modName = providers.gradleProperty("modName").get()
+val modVersion = providers.gradleProperty("modVersion").get()
+
+version = modVersion
+group = baseGroup
 
 base {
   archivesName = modName
-  version = modVersion
-  group = baseGroup
+}
+
+detekt {
+  buildUponDefaultConfig = true
+  config.setFrom(rootProject.file("config/detekt/detekt.yml"))
+  failOnSeverity = FailOnSeverity.Never
+  ignoredBuildTypes = listOf()
+  allRules = false
+}
+
+publishing {
+  publications {
+    create<MavenPublication>("mavenJava") {
+      from(components["java"])
+    }
+  }
 }
 
 repositories {
   mavenCentral()
-  maven("https://jitpack.io")
   maven("https://pkgs.dev.azure.com/djtheredstoner/DevAuth/_packaging/public/maven/v1")
-  maven("https://api.modrinth.com/maven")
 }
+
+loom {
+  accessWidenerPath = rootProject.file("src/main/resources/${modId}.accesswidener")
+}
+
+val jij = configurations.create("jij")
+
+jij.excludeProvidedLibs()
 
 dependencies {
-  minecraft("com.mojang:minecraft:${property("minecraft_version")}")
-  mappings(loom.officialMojangMappings())
+  minecraft(libs.minecraft)
 
-  modImplementation("net.fabricmc:fabric-loader:${property("loader_version")}")
-  modImplementation("net.fabricmc:fabric-language-kotlin:${property("fabric_kotlin_version")}")
-  modImplementation("net.fabricmc.fabric-api:fabric-api:${property("fabric_api_version")}")
+  api(libs.fabric.loader)
+  api(libs.fabric.api)
+  api(libs.fabric.kotlin)
 
-  modRuntimeOnly("me.djtheredstoner:DevAuth-fabric:1.2.1")
+  runtimeOnly("me.djtheredstoner:DevAuth-fabric:1.2.2")
 }
+
+addResolvedDependencies(jij, "compileOnly", "include", "api")
 
 tasks {
   processResources {
-    inputs.property("version", project.version)
+    val resourceProperties = mapOf(
+      "fabricLoaderVersion" to libs.versions.fabric.loader.get(),
+      "fabricKotlinVersion" to libs.versions.fabric.kotlin.get(),
+      "minecraftVersion" to libs.versions.minecraft.version.get(),
+      "modId" to modId,
+      "modName" to modName,
+      "modVersion" to modVersion,
+      "baseGroup" to baseGroup,
+    )
 
-    filesMatching("fabric.mod.json") {
-      expand(getProperties())
-      expand(mutableMapOf("version" to project.version))
+    inputs.properties(resourceProperties)
+
+    filesMatching(listOf("fabric.mod.json", "$modId.mixins.json")) {
+      expand(resourceProperties)
     }
   }
+}
 
-  publishing {
-    publications {
-      create<MavenPublication>("mavenJava") {
-        artifact(remapJar) {
-          builtBy(remapJar)
-        }
+tasks.withType<JavaCompile>().configureEach {
+  options.release = 25
+}
 
-        artifact(kotlinSourcesJar) {
-          builtBy(remapSourcesJar)
-        }
-      }
-    }
-  }
-
-  compileKotlin {
-    compilerOptions {
-      jvmTarget = JvmTarget.JVM_21
-    }
+kotlin {
+  compilerOptions {
+    jvmTarget = JvmTarget.JVM_25
   }
 }
 
 java {
-  toolchain {
-    languageVersion.set(JavaLanguageVersion.of(21))
-  }
+  sourceCompatibility = JavaVersion.VERSION_25
+  targetCompatibility = JavaVersion.VERSION_25
 }
